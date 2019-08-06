@@ -1,0 +1,80 @@
+# ingress configuration
+gateways:
+  enabled: true
+  istio-ingressgateway:
+    type: LoadBalancer
+    loadBalancerIP: "104.198.230.85"
+    autoscaleEnabled: true
+    autoscaleMax: 2
+    
+# common settings
+global:
+  # sidecar settings
+  proxy:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 2000m
+        memory: 256Mi
+  controlPlaneSecurityEnabled: false
+  mtls:
+    enabled: false
+  useMCP: true
+
+# pilot configuration
+pilot:
+  enabled: true
+  autoscaleEnabled: true
+  sidecar: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 128Mi
+
+# sidecar-injector webhook configuration
+sidecarInjectorWebhook:
+  enabled: true
+
+# security configuration
+security:
+  enabled: true
+
+# galley configuration
+galley:
+  enabled: true
+
+# mixer configuration
+mixer:
+  policy:
+    enabled: false
+    replicaCount: 1
+    autoscaleEnabled: true
+  telemetry:
+    enabled: true
+    replicaCount: 1
+    autoscaleEnabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 128Mi
+
+# addon prometheus configuration
+prometheus:
+  enabled: true
+  scrapeInterval: 5s
+
+# addon jaeger tracing configuration
+tracing:
+  enabled: true
+
+# addon grafana configuration
+grafana:
+  enabled: true
+  security:
+    enabled: true
+kiali:
+  enabled: true
+  security:
+    enabled: true

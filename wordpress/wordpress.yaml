@@ -1,0 +1,112 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: wordpress-volumeclaim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 200Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress
+  labels:
+    app: wordpress
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wordpress
+  template:
+    metadata:
+      labels:
+        app: wordpress
+      annotations:
+        readiness.status.sidecar.istio.io/applicationPorts: ""
+    spec:
+      containers:
+        - image: wordpress
+          name: wordpress
+          env:
+          - name: WORDPRESS_DB_HOST
+            value: 127.0.0.1:3306
+          - name: WORDPRESS_DB_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: wordpress-db-credentials
+                key: wordpress.db.username
+          - name: WORDPRESS_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: wordpress-db-credentials
+                key: wordpress.db.password
+          ports:
+            - containerPort: 80
+              name: wordpress
+          volumeMounts:
+            - name: wordpress-persistent-storage
+              mountPath: /var/www/html
+      # We are pulling the Cloud SQL Proxy container from the official Google
+        # container repository
+        - name: cloudsql-proxy
+          image: gcr.io/cloudsql-docker/gce-proxy:1.11
+        # You can make environment variables from GKE configurations
+        # You can read them from a configmap directly with configMapKeyRef
+          command: [
+          "/cloud_sql_proxy",
+          "-instances=coastal-pointer-246119:us-central1:application-relational-datastore=tcp:3306",
+        # We are accessing the secret file inside the volume.
+        # In most circumstances you would use environment variables but
+        # the Cloud SQL Proxy container wants a file so we give it one
+          "-credential_file=/secrets/cloudsql/credentials.json"
+          ]
+        # Once the volume is made earlier in the file you then mount the
+        # volume so you can access the secret file inside it
+          volumeMounts:
+          - name: cloudsql-oauth-credentials
+            mountPath: /secrets/cloudsql
+            readOnly: true
+      volumes:
+        - name: wordpress-persistent-storage
+          persistentVolumeClaim:
+            claimName: wordpress-volumeclaim
+        - name: cloudsql-oauth-credentials
+          secret:
+            secretName: cloudsql-oauth-credentials
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: wordpress
+  name: wordpress
+spec:
+  ports:
+  - name: 80-80
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: wordpress
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: wordpress
+  namespace: default
+spec:
+  hosts:
+  - "blog.kubernetesclustertest.com"
+  gateways:
+  - public-gateway.istio-system.svc.cluster.local
+  http:
+  - route:
+    - destination:
+        host: wordpress
+        port:
+          number: 80
+    timeout: 30s
+---

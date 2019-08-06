@@ -5,7 +5,7 @@
 # https://rinormaloku.com/series/istio-around-everything-else/ 
 ###############################################
 
-
+# Setup the cluster
 
 k8s_version=$(gcloud container get-server-config --region=us-central1 --format=json \
 | jq -r '.validNodeVersions[0]')
@@ -17,10 +17,20 @@ gcloud container clusters create istio \
 --machine-type=n1-standard-2 \
 --preemptible \
 --enable-autorepair \
---scopes=gke-default
+--enable-autoupgrade \
+--scopes='https://www.googleapis.com/auth/cloud-platform'
 
 gcloud container clusters get-credentials istio -z=us-central1-a
 
+# Installs helm
+curl https://raw.githubusercontent.com/kubernetes/helm/master/scripts/get | bash
+
+# Sets up tiller service account
+kubectl --namespace kube-system create sa tiller
+kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=kube-system:tiller
+helm init --service-account tiller --upgrade --wait
+
+# Setup domain name
 
 gcloud dns managed-zones create \
 --dns-name="kubernetesclustertest.com." \
@@ -28,7 +38,9 @@ gcloud dns managed-zones create \
 
 gcloud dns managed-zones describe istio
 
-watch dig +short NS kubernetesclustertest.com
+## Neede3d? watch dig +short NS kubernetesclustertest.com
+
+## Point your domain to google now
 
 gcloud compute addresses create istio-gateway-ip --region us-central1
 
@@ -36,7 +48,7 @@ gcloud compute addresses describe istio-gateway-ip --region us-central1
 
 DOMAIN="kubernetesclustertest.com"
 ## Run this first to get clusterIP GATEWAYIP=gcloud compute addresses describe istio-gateway-ip --region us-central1
-GATEWAYIP=<CLUSTER_IP>
+GATEWAYIP=$(gcloud compute addresses describe istio-gateway-ip --region us-central1 | grep "address:" | cut -d':' -f 2 | tr -d '[:space:]')
 
 gcloud dns record-sets transaction start --zone=istio
 
@@ -53,11 +65,11 @@ gcloud dns record-sets transaction execute --zone istio
 
 watch host test.kubernetesclustertest.com
 
-kubectl --namespace kube-system create sa tiller
-kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=kube-system:tiller
-./helm init --service-account tiller --upgrade --wait
+#############
+## Istio
+#############
 
-export ISTIO_VER="1.2.0"
+export ISTIO_VER="1.2.3"
 
 helm repo add istio.io https://storage.googleapis.com/istio-release/releases/${ISTIO_VER}/charts
 helm upgrade -i istio-init istio.io/istio-init --wait --namespace istio-system
@@ -87,15 +99,16 @@ data:
   passphrase: YWRtaW4=
 EOF
 
+# Make sure to set static IP address in my-istio.yaml prior to running this
 helm upgrade --install istio istio.io/istio \
 --namespace=istio-system \
 -f ./my-istio.yaml
 
 watch kubectl -n istio-system get pods
 
-kubectl apply -f ./istio-gateway.yaml
+kubectl apply -f ./ingress-gateway.yaml
 
-GCP_PROJECT=gke-istio-spinnaker-cloud
+GCP_PROJECT=gke-istio-tut
 
 gcloud iam service-accounts create dns-admin \
 --display-name=dns-admin \
@@ -113,6 +126,8 @@ kubectl create secret generic cert-manager-credentials \
 --from-file=./gcp-dns-admin.json \
 --namespace=istio-system
 
+# Handle certificate
+
 CERT_REPO=https://raw.githubusercontent.com/jetstack/cert-manager
 
 kubectl apply -f ${CERT_REPO}/release-0.7/deploy/manifests/00-crds.yaml
@@ -121,18 +136,62 @@ kubectl create namespace cert-manager
 
 kubectl label namespace cert-manager certmanager.k8s.io/disable-validation=true
 
-./helm repo add jetstack https://charts.jetstack.io && \
-./helm repo update && \
-./helm upgrade -i cert-manager \
+# Replace temporarily with version 0.9.0 --version v0.7.0 \
+helm repo add jetstack https://charts.jetstack.io && \
+helm repo update && \
+helm upgrade -i cert-manager \
 --namespace cert-manager \
---version v0.7.0 \
+--version v0.9.0 \
 jetstack/cert-manager
 
+# Change project id in this file
 kubectl apply -f ./letsencrypt-issuer.yaml
 
 kubectl apply -f ./of-cert.yaml
 
-kubectl -n istio-system describe certificate istio-gateway
+# Check for saying "Certificate issued Successfully"
+watch kubectl -n istio-system describe certificate istio-gateway
+
+# Delete ingress gateway pods
+kubectl -n istio-system delete pods -l istio=ingressgateway
+
+# Verify that it was configured correctly
+kubectl apply -f grafana-virtual-service.yaml
+
+##################
+## Spinnaker
+##################
+#########
+# Method A - New way with Spinnaker for GCP
+#########
+
+kubectl create namespace spinnaker
+kubectl label namespace spinnaker istio-injection=enabled
+
+## Spinnaker for GCP is a new offering to ease spinnaker installs
+## https://github.com/googlecloudplatform/spinnaker-for-gcp
+## click "Open in Google Cloud Shell" to start.
+
+## Follow onscreen instructions
+
+PROJECT_ID=istio-gke-post \
+    ~/spinnaker-for-gcp/scripts/install/setup_properties.sh
+
+cloudshell edit \
+    ~/spinnaker-for-gcp/scripts/install/properties
+
+## Edit the file to use your cluster name instead of export GKE_CLUSTER=$DEPLOYMENT_NAME
+
+~/spinnaker-for-gcp/scripts/install/setup.sh
+
+## Expose spin-deck and spin-gate as a virtual service
+## Set different domain names for the two of them. Save time and anguish 
+## https://www.digitalocean.com/community/tutorials/how-to-set-up-a-cd-pipeline-with-spinnaker-on-digitalocean-kubernetes
+
+
+#########
+# Method B - Old way, manual
+#########
 
 gcloud iam service-accounts create  spinnaker-account \
     --display-name spinnaker-account
@@ -157,6 +216,8 @@ export SA_EMAIL=$(gcloud iam service-accounts list \
     --format='value(email)')
 gcloud beta pubsub subscriptions add-iam-policy-binding gcr-triggers \
     --role roles/pubsub.subscriber --member serviceAccount:$SA_EMAIL
+
+## TODO: REMOVE THIS - gcloud source repos create demo
 
 kubectl create clusterrolebinding --clusterrole=cluster-admin --serviceaccount=default:default spinnaker-admin
 
@@ -216,13 +277,32 @@ kubectl label namespace default istio-injection=enabled
 
 # NOTE: do not put hyphens in the host field... It wont work
 
+####################
+## Deploying an app
+#################### 
+
+####################
+# Wordpress
+####################
+
+####################
+# Potential issues:
+# oauth2: cannot fetch token: Post https://oauth2.googleapis.com/token
+# - Fix by allowing access to gke apis for auth and metadata
+# - https://github.com/GoogleCloudPlatform/microservices-demo/blob/master/istio-manifests/whitelist-egress-googleapis.yaml
+####################
+
+kubectl label namespace default istio-injection=enabled
+
 # May "fail" based on a timeout
-gcloud sql instances create application-relational-datastore --tier=db-f1-micro --region=us-central1
+gcloud sql instances create application-relational-datastore --tier=db-f1-micro --region=us-central1 --no-assign-ip
 
 gcloud sql users set-password root \
     --host=% --instance=application-relational-datastore --prompt-for-password
 
-cloud sql users create demo-user    --host=% --instance=application-relational-datastore --password=Foo1234
+gcloud sql users create wordpress-user    --host=% --instance=application-relational-datastore --password='Test1234!'
+
+kubectl create secret generic wordpress-db-credentials --from-literal='wordpress.db.username=wordpress-user' --from-literal='wordpress.db.password=Test1234!'
 
 gcloud iam service-accounts create cloud-sql-account \
     --display-name cloud-sql-account
@@ -239,5 +319,54 @@ gcloud iam service-accounts keys create cloud-sql-sa.json --iam-account $SA_EMAI
 
 kubectl create secret generic cloudsql-oauth-credentials --from-file=credentials.json=cloud-sql-sa.json
 
-kubectl create secret generic demo-db-password --from-literal=spring.datasource.username=demo-user --from-literal=spring.datasource.password=Foo1234
+# Make sure to enable cloud sql api
+https://console.developers.google.com/apis/api/sqladmin.googleapis.com/overview
+
+# Edit virtual service yaml file to list pulic ip to db
+kubectl apply -f google-apis-vs.yaml
+
+# Edit wordpress yaml file to include project url for cloud sql proxy
+kubectl apply -f word-press.yaml
+
+#####################
+## Installing Jenkins
+#####################
+
+helm install -n jenkins stable/jenkins -f jenkins.yaml --wait --debug
+kubectl apply -f jenkins-vs.yaml
+
+# connect to Halyard container
+# <need to add command>
+gcloud container clusters get-credentials istio --zone us-central1-a --project istio-gke-post  && kubectl exec -it spin-halyard-0 --namespace halyard -c halyard-daemon -- /bin/bash
+
+hal config ci jenkins enable
+hal config ci jenkins master add my-jenkins-master \
+    --address $BASEURL \
+    --username $USERNAME \
+    --password # password will be read from STDIN to avoid appearing
+               # in your .bash_history
+
+hal deploy apply
+
+# Don't touch spin services directly through kubectl apply. 
+# They have to be maanged by halyard and are finicky.
+
+# 429 when igor tries to call Jenkins
+# Make sure to delegate user access to Jenkins own user database
+# Add any type of job to prevent 429 when getting job list back. 
+# Source: https://github.com/spinnaker/spinnaker/issues/892
+
+gcloud iam service-accounts create  jenkins-account \
+    --display-name jenkins-account
+
+export JENKINS_EMAIL=$(gcloud iam service-accounts list \
+    --filter="displayName:jenkins-account" \
+    --format='value(email)')
+export PROJECT=$(gcloud info --format='value(config.project)')
+
+gcloud projects add-iam-policy-binding \
+    $PROJECT --role roles/source.reader  --member serviceAccount:$JENKINS_EMAIL
+
+gcloud iam service-accounts keys create jenkins-sa.json --iam-account $JENKINS_EMAIL
+
 
