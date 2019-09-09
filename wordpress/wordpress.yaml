@@ -33,7 +33,7 @@ spec:
           env:
           - name: WORDPRESS_DB_HOST
             value: 127.0.0.1:3306
-          - name: WORDPRESS_DB_USERNAME
+          - name: WORDPRESS_DB_USER
             valueFrom:
               secretKeyRef:
                 name: wordpress-db-credentials
@@ -57,12 +57,17 @@ spec:
         # You can read them from a configmap directly with configMapKeyRef
           command: [
           "/cloud_sql_proxy",
-          "-instances=coastal-pointer-246119:us-central1:application-relational-datastore=tcp:3306",
+          "-instances=gke-istio-tut:us-central1:application-relational-datastore=tcp:3306",
         # We are accessing the secret file inside the volume.
         # In most circumstances you would use environment variables but
         # the Cloud SQL Proxy container wants a file so we give it one
           "-credential_file=/secrets/cloudsql/credentials.json"
           ]
+          # [START cloudsql_security_context]
+          securityContext:
+            runAsUser: 2  # non-root user
+            allowPrivilegeEscalation: false
+          # [END cloudsql_security_context]
         # Once the volume is made earlier in the file you then mount the
         # volume so you can access the secret file inside it
           volumeMounts:

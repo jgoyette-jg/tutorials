@@ -1,0 +1,44 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: google-apis
+spec:
+  hosts:
+  - "metadata.google" # GCE metadata server
+  - "metadata.google.internal" # GCE metadata server
+  - "accounts.google.com" # Used to get token
+  - "*.googleapis.com"
+  ports:
+  - name: https
+    number: 443
+    protocol: HTTPS
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: google-database
+spec:
+  hosts:
+  - "google.database" # GCE database ignored mostly if address is also present
+  addresses:
+  - "35.226.218.224"
+  ports:
+  - name: tcp
+    number: 3307
+    protocol: tcp
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: google-redis
+  namespace: spinnaker
+spec:
+  hosts:
+  - "redis.googleapis.com" # Ignored mostly if address is also present
+  addresses:
+  - "10.0.0.11"
+  ports:
+  - name: tcp
+    number: 6379
+    protocol: TCP 
+---

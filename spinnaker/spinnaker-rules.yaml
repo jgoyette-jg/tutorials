@@ -1,0 +1,22 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: spin-deck
+  namespace: spinnaker
+spec:
+  host: spinnaker.kubernetesclustertest.com
+  trafficPolicy:
+    tls:
+      mode: DISABLE
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: spin-gate
+  namespace: spinnaker
+spec:
+  host: spinnaker-api.kubernetesclustertest.com
+  trafficPolicy:
+    tls:
+      mode: DISABLE
+---

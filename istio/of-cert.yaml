@@ -6,7 +6,7 @@ metadata:
 spec:
   secretName: istio-ingressgateway-certs
   issuerRef:
-    name: letsencrypt-prod
+    name: letsencrypt-staging
   commonName: "*.kubernetesclustertest.com"
   acme:
     config:

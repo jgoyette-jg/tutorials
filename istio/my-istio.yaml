@@ -1,9 +1,11 @@
 # ingress configuration
 gateways:
   enabled: true
+#  sds:
+#    enabled: true
   istio-ingressgateway:
     type: LoadBalancer
-    loadBalancerIP: "104.198.230.85"
+    loadBalancerIP: "35.192.222.124"
     autoscaleEnabled: true
     autoscaleMax: 2
     
@@ -18,9 +20,9 @@ global:
       limits:
         cpu: 2000m
         memory: 256Mi
-  controlPlaneSecurityEnabled: false
+  controlPlaneSecurityEnabled: true
   mtls:
-    enabled: false
+    enabled: true
   useMCP: true
 
 # pilot configuration
@@ -78,3 +80,7 @@ kiali:
   enabled: true
   security:
     enabled: true
+
+#certmanager:
+#  enabled: true
+#  email: jgoyette.aws@gmail.com

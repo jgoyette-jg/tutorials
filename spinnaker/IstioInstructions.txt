@@ -7,17 +7,19 @@
 
 # Setup the cluster
 
+## Weirdly failing, use 1.13.7-gke-7 until working again
 k8s_version=$(gcloud container get-server-config --region=us-central1 --format=json \
 | jq -r '.validNodeVersions[0]')
 
 gcloud container clusters create istio \
---cluster-version=${k8s_version} \
+--cluster-version=1.13.7-gke.8 \
 --zone=us-central1-a \
 --num-nodes=4 \
 --machine-type=n1-standard-2 \
 --preemptible \
 --enable-autorepair \
 --enable-autoupgrade \
+--enable-ip-alias \
 --scopes='https://www.googleapis.com/auth/cloud-platform'
 
 gcloud container clusters get-credentials istio -z=us-central1-a
@@ -130,11 +132,12 @@ kubectl create secret generic cert-manager-credentials \
 
 CERT_REPO=https://raw.githubusercontent.com/jetstack/cert-manager
 
-kubectl apply -f ${CERT_REPO}/release-0.7/deploy/manifests/00-crds.yaml
+kubectl apply -f ${CERT_REPO}/release-0.9/deploy/manifests/00-crds.yaml
 
 kubectl create namespace cert-manager
 
 kubectl label namespace cert-manager certmanager.k8s.io/disable-validation=true
+#kubectl label namespace cert-manager certmanager.k8s.io/disable-validation=true
 
 # Replace temporarily with version 0.9.0 --version v0.7.0 \
 helm repo add jetstack https://charts.jetstack.io && \
@@ -174,20 +177,16 @@ kubectl label namespace spinnaker istio-injection=enabled
 
 ## Follow onscreen instructions
 
-PROJECT_ID=istio-gke-post \
+PROJECT_ID=gke-istio-tut \
     ~/spinnaker-for-gcp/scripts/install/setup_properties.sh
 
+## Edit the file to use your cluster name instead of export GKE_CLUSTER=$DEPLOYMENT_NAME
+## Also make sure to set the region and zone your cluster is in.
 cloudshell edit \
     ~/spinnaker-for-gcp/scripts/install/properties
 
-## Edit the file to use your cluster name instead of export GKE_CLUSTER=$DEPLOYMENT_NAME
 
 ~/spinnaker-for-gcp/scripts/install/setup.sh
-
-## Expose spin-deck and spin-gate as a virtual service
-## Set different domain names for the two of them. Save time and anguish 
-## https://www.digitalocean.com/community/tutorials/how-to-set-up-a-cd-pipeline-with-spinnaker-on-digitalocean-kubernetes
-
 
 #########
 # Method B - Old way, manual
@@ -277,6 +276,27 @@ kubectl label namespace default istio-injection=enabled
 
 # NOTE: do not put hyphens in the host field... It wont work
 
+###############
+# Final Touches
+###############
+## Expose spin-deck and spin-gate as a virtual service
+## Set different domain names for the two of them. Save time and anguish 
+## https://www.digitalocean.com/community/tutorials/how-to-set-up-a-cd-pipeline-with-spinnaker-on-digitalocean-kubernetes
+
+gcloud container clusters get-credentials istio --zone us-central1-a --project gke-istio-tut  && kubectl exec -it spin-halyard-0 --namespace halyard -c halyard-daemon -- 
+/bin/bash
+
+hal config security api edit --override-base-url https://spinnaker-api.kubernetesclustertest.com
+hal config security ui edit --override-base-url https://spinnaker.kubernetesclustertest.com
+
+hal deploy apply
+
+exit
+
+kubectl apply -f spinnaker-deck-vs.yaml
+kubectl apply -f spinnaker-gate-vs.yaml
+kubectl apply -f spinnaker-rules.yaml
+
 ####################
 ## Deploying an app
 #################### 
@@ -295,7 +315,7 @@ kubectl label namespace default istio-injection=enabled
 kubectl label namespace default istio-injection=enabled
 
 # May "fail" based on a timeout
-gcloud sql instances create application-relational-datastore --tier=db-f1-micro --region=us-central1 --no-assign-ip
+gcloud sql instances create application-relational-datastore --tier=db-f1-micro --region=us-central1
 
 gcloud sql users set-password root \
     --host=% --instance=application-relational-datastore --prompt-for-password
@@ -336,8 +356,10 @@ helm install -n jenkins stable/jenkins -f jenkins.yaml --wait --debug
 kubectl apply -f jenkins-vs.yaml
 
 # connect to Halyard container
-# <need to add command>
-gcloud container clusters get-credentials istio --zone us-central1-a --project istio-gke-post  && kubectl exec -it spin-halyard-0 --namespace halyard -c halyard-daemon -- /bin/bash
+gcloud container clusters get-credentials istio --zone us-central1-a --project gke-istio-tut  && kubectl exec -it spin-halyard-0 --namespace halyard -c halyard-daemon -- /bin/bash
+
+export BASEURL=https://jenkins:8080
+export USERNAME=admin
 
 hal config ci jenkins enable
 hal config ci jenkins master add my-jenkins-master \

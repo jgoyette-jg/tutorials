@@ -1,0 +1,15 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: spin-deck
+  namespace: spinnaker
+spec:
+  hosts:
+  - "spinnaker.kubernetesclustertest.com"
+  gateways:
+  - public-gateway.istio-system.svc.cluster.local
+  http:
+  - route:
+    - destination:
+        host: spin-deck.spinnaker.svc.cluster.local
+
